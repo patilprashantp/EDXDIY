@@ -1,0 +1,277 @@
+---
+title: "TimeSeriesForecast"
+author: "Prashant Patil"
+date: "February 12, 2019"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r ratings, message=FALSE, warning=FALSE, paged.print=FALSE, echo=FALSE}
+#############################################################
+# Install required packages
+#############################################################
+repos_link <- "http://cran.us.r-project.org"
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = repos_link)
+if(!require(caret)) install.packages("caret", repos = repos_link)
+if(!require(forecast)) install.packages("forecast", repos = repos_link)
+if(!require(nnet)) install.packages("nnet", repos = repos_link)
+library(tidyverse)
+library(caret)
+library(forecast)
+library(nnet)
+
+### Downloading from Kaggle requires account with them, so download steps are not included with this script. The csv file downloaded from Kaggle is included with submission. Save this file to local directory and change the value of localDirectory variable for the script to work as expected.
+
+localDirectory <- "C:\\temp\\DIYProject\\"
+fName <- "all_stocks_2006-01-01_to_2018-01-01.csv"
+## Load data in allStocks dataframe. Stock specific data will be used as needed
+allStocks <- read.csv(file.path(localDirectory,fName))
+
+aaplData <- allStocks %>% filter(Name=="AAPL")
+```
+
+## Time Series Forecasting using R
+
+## Introduction
+Burton Malkiel a Princeton University professor claimed in his book, a blindfolded monkey throwing darts at a newspaper's financial pages could select a portfolio that would do just as well as one carefully selected by experts. While the direction of stocks or market is dependent on multiple factors, in this analysis we try to apply different prediction methods/machine learning algorithms to see if we can make a better and informed judgement. We compare different Time serries prediction models based on the RMSE.
+
+There are serveral other factors which can be explored for improving prediction e.g. Corelation between opening and closing price etc. This study just focuses on Time Series.
+
+## Overview:
+The goal is perform a time series analysis of avaiable data and try to forecast. For this we use <https://www.kaggle.com/szrlee/stock-time-series-20050101-to-20171231>. It has historical data of DJIA 30 companies from Jan 2006 to Dec 2017. This dataset contains:
+
+```{r data, echo=FALSE}
+head(aaplData)
+```
+
+Date - Date for which the data is collected
+Open - Price at which the stock trading opened
+High - Highest stock price for that day
+Low - Lowed stock price for that day
+Close - Price at which the stock trading closed
+Volume - Number of shares traded
+Name - Stock code AAPL - Apple Inc.
+
+We will use the closing price of stock for this prediction. 
+
+## Analysis:
+
+For dividing data in training and test parts, we can not use random splitting because we will lose the time sequence. So we divide the data by years. Data from 2006 to 2016 will be used for training and we will use 2017 data for testing our models. This same analysis can be applied to differnt time series forecasts like Sales, Call Volume etc.
+
+There are `r nrow(aaplData)` rows available and 2016 data ends on index `r which(aaplData$Date=="2016-12-30")`. 
+
+For simplicity we will keep last 300 observations as our test data and rest of the data will be used for training the models.
+
+We are using Closing price prediction, the following plot shows the current trend of closing price.
+
+```{r tsPlot, echo=FALSE}
+plot(aaplData$Date,aaplData$Close)
+```
+
+## Methods:
+There are serveral approaches to time series analysis. We use forecast package in R and compare the result of different methods based on RMSE of final prediction we will select the best approach.
+
+```{r dataPrep, echo=FALSE}
+trainIndex <- nrow(aaplData)-300;
+testIndex <- trainIndex+1;
+trainData <- aaplData[1:trainIndex,]
+testData <- aaplData[testIndex:nrow(aaplData),]
+```
+
+#### 1. Mean Forecast: 
+By this approach we are going to predict values based on simple mean of available train data.
+
+
+```{r method1, message=FALSE, warning=FALSE}
+fit_meanf <- meanf(trainData[,5], h = 300)
+pred_meanf <- as.numeric(fit_meanf$mean)
+RMSE(testData$Close,pred_meanf)
+```
+
+
+#### 2. Naive Prediction: 
+This approach uses the forecast value to be same as previous available value. 
+
+```{r method2, message=FALSE, warning=FALSE}
+fit_naive <- naive(trainData[,5], h = 300)
+pred_naive <- as.numeric(fit_naive$mean)
+RMSE(testData$Close,pred_naive)
+```
+
+#### 3. Random Walk Forest - Drift Method: 
+This approach predicts the future values based on change in historical values over the time.
+
+```{r method3, message=FALSE, warning=FALSE}
+fit_rwf <- rwf(trainData[,5], h = 300, drift = TRUE)
+pred_rwf <- as.numeric(fit_rwf$mean)
+RMSE(testData$Close,pred_rwf)
+```
+
+#### 4. Time series Linear Regression: 
+This approach predicts the value based on the trend and seasonality over the time in training data.
+
+```{r method4, message=FALSE, warning=FALSE}
+fit_lm <- tslm(as.ts(trainData[, 5]) ~ trend)
+pred_lm <- as.numeric(forecast(fit_lm, h = 300)$mean)
+RMSE(testData$Close,pred_lm)
+```
+
+#### 5. Exponential Smoothing State Space model: 
+This model uses a state space framework for automatic forecasting using exponential smoothing methods.
+
+```{r method5, message=FALSE, warning=FALSE}
+fit_ets <- trainData[,5] %>% ets(model="MMZ")
+pred_ets <- as.numeric(forecast(fit_ets, h = 300)$mean)
+RMSE(testData$Close,pred_ets)
+```
+
+#### 6. Neutral Networks: 
+This approach uses forecast using neutral network models.
+
+```{r method6, message=FALSE, warning=FALSE}
+fit_NeuNet <- nnetar(as.ts(trainData[,5]))
+pred_nn <- as.numeric(forecast(fit_NeuNet, h = 300)$mean)
+RMSE(testData$Close,pred_nn)
+```
+
+```{r predMoreStocks, message=FALSE, warning=FALSE,echo=FALSE}
+
+### Save Current Results to a dataframe
+rmse_results <- data_frame(Method = "Mean Forecast", RMSE_AAPL = RMSE(testData$Close,pred_meanf))
+
+rmse_results <- bind_rows(rmse_results,data_frame(Method="Naive Prediction",  
+                        RMSE_AAPL = RMSE(testData$Close,pred_naive)))
+
+rmse_results <- bind_rows(rmse_results,data_frame(Method="Random Walk Forest",  
+                        RMSE_AAPL = RMSE(testData$Close,pred_rwf)))									 
+
+rmse_results <- bind_rows(rmse_results,data_frame(Method="Time series Linear Regression",  
+                        RMSE_AAPL = RMSE(testData$Close,pred_lm)))	
+
+rmse_results <- bind_rows(rmse_results,data_frame(Method="Exponential Smoothing",  
+                        RMSE_AAPL = RMSE(testData$Close,pred_ets)))	
+
+rmse_results <- bind_rows(rmse_results,data_frame(Method="Neutral Network",  
+                        RMSE_AAPL = RMSE(testData$Close,pred_nn)))
+
+## Stock 2 - Walmart data load and predict
+wmtData <- allStocks %>% filter(Name=="WMT")
+trainIndex <- nrow(wmtData)-300;
+testIndex <- trainIndex+1;
+trainData <- wmtData[1:trainIndex,]
+testData <- wmtData[testIndex:nrow(wmtData),]
+
+fit_meanf <- meanf(trainData[,5], h = 300)
+pred_meanf <- as.numeric(fit_meanf$mean)
+
+fit_naive <- naive(trainData[,5], h = 300)
+pred_naive <- as.numeric(fit_naive$mean)
+
+fit_rwf <- rwf(trainData[,5], h = 300, drift = TRUE)
+pred_rwf <- as.numeric(fit_rwf$mean)
+
+fit_lm <- tslm(as.ts(trainData[, 5]) ~ trend)
+pred_lm <- as.numeric(forecast(fit_lm, h = 300)$mean)
+
+fit_ets <- trainData[,5] %>% ets(model="MMZ")
+pred_ets <- as.numeric(forecast(fit_ets, h = 300)$mean)
+
+fit_NeuNet <- nnetar(as.ts(trainData[,5]))
+pred_nn <- as.numeric(forecast(fit_NeuNet, h = 300)$mean)
+
+### Save RMSEs to local DF 								 
+rmse_WMT <- data_frame(RMSE_WMT = RMSE(testData$Close,pred_meanf))
+
+rmse_WMT <- bind_rows(rmse_WMT,
+                          data_frame(RMSE_WMT = RMSE(testData$Close,pred_naive)))
+
+rmse_WMT <- bind_rows(rmse_WMT,
+                          data_frame(RMSE_WMT = RMSE(testData$Close,pred_rwf)))
+						  
+rmse_WMT <- bind_rows(rmse_WMT,
+                          data_frame(RMSE_WMT = RMSE(testData$Close,pred_lm))) 
+
+rmse_WMT <- bind_rows(rmse_WMT,
+                          data_frame(RMSE_WMT = RMSE(testData$Close,pred_ets))) 
+
+rmse_WMT <- bind_rows(rmse_WMT,
+                          data_frame(RMSE_WMT = RMSE(testData$Close,pred_nn))) 
+
+## Stock 3 - Disney data load and predict
+
+disData <- allStocks %>% filter(Name=="DIS")
+trainIndex <- nrow(disData)-300;
+testIndex <- trainIndex+1;
+trainData <- disData[1:trainIndex,]
+testData <- disData[testIndex:nrow(disData),]
+
+fit_meanf <- meanf(trainData[,5], h = 300)
+pred_meanf <- as.numeric(fit_meanf$mean)
+
+fit_naive <- naive(trainData[,5], h = 300)
+pred_naive <- as.numeric(fit_naive$mean)
+
+fit_rwf <- rwf(trainData[,5], h = 300, drift = TRUE)
+pred_rwf <- as.numeric(fit_rwf$mean)
+
+fit_lm <- tslm(as.ts(trainData[, 5]) ~ trend)
+pred_lm <- as.numeric(forecast(fit_lm, h = 300)$mean)
+
+fit_ets <- trainData[,5] %>% ets(model="MMZ")
+pred_ets <- as.numeric(forecast(fit_ets, h = 300)$mean)
+
+fit_NeuNet <- nnetar(as.ts(trainData[,5]))
+pred_nn <- as.numeric(forecast(fit_NeuNet, h = 300)$mean)
+
+### Save RMSEs to local DF 
+rmse_DIS <- data_frame(RMSE_DIS = RMSE(testData$Close,pred_meanf))
+
+rmse_DIS <- bind_rows(rmse_DIS,
+                          data_frame(RMSE_DIS = RMSE(testData$Close,pred_naive)))
+
+rmse_DIS <- bind_rows(rmse_DIS,
+                          data_frame(RMSE_DIS = RMSE(testData$Close,pred_rwf)))
+						  
+rmse_DIS <- bind_rows(rmse_DIS,
+                          data_frame(RMSE_DIS = RMSE(testData$Close,pred_lm))) 
+
+rmse_DIS <- bind_rows(rmse_DIS,
+                          data_frame(RMSE_DIS = RMSE(testData$Close,pred_ets)))
+						  
+rmse_DIS <- bind_rows(rmse_DIS,
+                          data_frame(RMSE_DIS = RMSE(testData$Close,pred_nn))) 
+
+rmse_results$RMSE_DIS <- rmse_DIS$RMSE_DIS
+rmse_results$RMSE_WMT <- rmse_WMT$RMSE_WMT
+
+```
+
+
+## Conclusion:
+
+The following graph shows predictions for Disney Stock and also actual values. Mean forecast is excluded from plot to focus on predictions which are closer to actuals.
+
+```{r results, echo=FALSE}
+plot.ts(testData[,5], main = "Closing value Prediction - Disney")
+lines(pred_naive, col = "blue")
+lines(pred_rwf, col = "yellow4")
+lines(pred_lm, col = "purple")
+lines(pred_ets, col = "green")
+lines(pred_nn, col = "orange")
+legend("topleft",lty=1,col=c("blue","yellow4","purple","green","orange"), cex = 0.75,
+       legend=c("Naive method","Drift Naive method","Linear Regression","Exp Smoothing","Neutal Network"))
+```
+
+In this project we compared Time Series predictions using different models. Same models are applied to 3 different stocks. Following table shows the RMSEs obtained for different stocks. 
+
+```{r rmseResults, echo=FALSE}
+rmse_results
+```
+
+Out of the methods compared, Exponential smoothing method appears to be most effective. There are several more methods like LSTM, RNN, GRU etc. which can be explored further for time series prediction.
